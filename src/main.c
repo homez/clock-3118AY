@@ -31,30 +31,6 @@ void hwInit(void)
 	return;
 }
 
-void cancelEdit(void)
-{
-	while(refstart == 0) {}
-	displayClear();
-	EA = 0;
-	settingsInit();
-	EA = 1;
-	dispMode = MODE_MAIN;
-
-	return;
-}
-
-void saveEdit(void)
-{
-	while(refstart == 0) {}
-	displayClear();
-	EA = 0;
-	settingsSave();
-	EA = 1;
-	dispMode = MODE_MAIN;
-
-	return;
-}
-
 void main(void)
 {
 	uint8_t cmd;
@@ -76,7 +52,10 @@ void main(void)
 				adcConvert();
 			}
 			checkAlarm();
-			checkHolidays();
+			if(widgetNumber != WI_HOLY)
+			{
+				checkHolidays();
+			}
 		}
 
 		cmd = getBtnCmd();
@@ -138,7 +117,7 @@ void main(void)
 					case MODE_EDIT_TIME: {
 						if(rtc.etm == RTC_SEC) {
 							rtcSaveTime();
-							resetDispLoop();
+							backToMainMode(BACK);
 						}
 						else {
 							rtcNextEditParam();
@@ -148,7 +127,7 @@ void main(void)
 					case MODE_EDIT_DATE: {
 						if(rtc.etm == RTC_DATE) {
 							rtcSaveDate();
-							resetDispLoop();
+							backToMainMode(BACK);
 						}
 						else {
 							rtcNextEditParam();
@@ -158,8 +137,7 @@ void main(void)
 					case MODE_EDIT_ALARM: {
 						if((alarm.etm == ALARM_ON && !alarm.on)||(alarm.etm == ALARM_SUN)) {
 							alarmSave();
-							saveEdit();
-							resetDispLoop();
+							backToMainMode(SAVEANDBACK);
 						}
 						else {
 							alarmNextEditParam();
@@ -172,8 +150,7 @@ void main(void)
 					case MODE_EDIT_DOT:
 					case MODE_EDIT_BRIGHT:
 					case MODE_EDIT_TEMP_COEF: {
-						saveEdit();
-						resetDispLoop();
+						backToMainMode(SAVEANDBACK);
 						break;
 					}
 				}
@@ -192,11 +169,12 @@ void main(void)
 					case MODE_EDIT_DOT:
 					case MODE_EDIT_BRIGHT:
 					case MODE_EDIT_TEMP_COEF: {
-						cancelEdit();
+						backToMainMode(CANCELANDBACK);
+						break;
 					}
 					case MODE_EDIT_TIME:
 					case MODE_EDIT_DATE: {
-						resetDispLoop();
+						backToMainMode(BACK);
 						break;
 					}
 				}
@@ -223,8 +201,8 @@ void main(void)
 
 		dotcount++;
 		refcount++;
-		if( holiday&&(widgetNumber == WI_HOLY) && (refcount % 5) == 0 ) {
-			if(scroll_index >=0) scroll_index++;
+		if(holiday&&(widgetNumber == WI_HOLY) && (refcount % SCROLLDIV) == 0) {
+			incRenderIndex();
 		}
 		if( dotcount > 59 ) dotcount = 0;
 		if( refcount > 59 ) {

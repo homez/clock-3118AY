@@ -48,6 +48,7 @@ void settingsSave(void)
 	IapEraseSector((uint16_t)(workSector <<9));
 
 	// у STC15F2K16S2 90 блоков(секторов) по 512 байт, вроде как рассчитаных на 100к стераний.
+	// которые проецируются в память начиная с 0x4000
 
 	for( i=0; i < sizeof(EEP_Param); i++) {
 		IapProgramByte((uint16_t)(workSector <<9) + i, *((uint8_t*)&eep + i));

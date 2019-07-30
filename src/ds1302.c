@@ -6,7 +6,7 @@
 RTC_type rtc;
 
 static code RTC_type rtcMin = {0, 0, 0, 1, 1, 1, 0, RTC_NOEDIT};
-static code RTC_type rtcMax = {59, 59, 23, 31, 12, 7, 99, RTC_NOEDIT};
+static code RTC_type rtcMax = {59, 59, 23, 7, 31, 12, 99, RTC_NOEDIT};
 
 static code uint16_t rtcMonthNumberDay[12] = {0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334};
 
@@ -43,33 +43,35 @@ uint8_t rtcDaysInMonth(void)
 	return ret;
 }
 
-void ds1302InputByte(uint8_t value)
-{ 
+void ds1302SendByte(uint8_t value)
+{
 	uint8_t i;
 
-	ACC = value;
+	DS1302_SCLK = 0;
 	for (i = 8; i > 0; i--) {
-		DS1302_IO = ACC0;
+		DS1302_IO = value & 0x01;
 		DS1302_SCLK = 1;
 		DS1302_SCLK = 0;
-		ACC = ACC >> 1; 
+		value >>= 1;
 	}
 
 	return;
 }
 
-uint8_t ds1302OutputByte(void)
+uint8_t ds1302ReadByte(void)
 { 
-	uint8_t i;
+	uint8_t i, result = 0;
 
 	for (i = 8; i > 0; i--) {
-		ACC = ACC >>1;
-		ACC7 = DS1302_IO;
+		result >>= 1;
+		DS1302_IO = 1;
+		if(DS1302_IO)
+			result |= 0x80;
 		DS1302_SCLK = 1;
 		DS1302_SCLK = 0;
 	}
 
-	return ACC;
+	return result;
 }
 
 void ds1302WriteReg(uint8_t reg, uint8_t value)
@@ -77,8 +79,8 @@ void ds1302WriteReg(uint8_t reg, uint8_t value)
 	DS1302_CE = 0;
 	DS1302_SCLK = 0;
 	DS1302_CE = 1;
-	ds1302InputByte(reg);
-	ds1302InputByte(value);
+	ds1302SendByte(reg);
+	ds1302SendByte(value);
 	DS1302_SCLK = 1;
 	DS1302_CE = 0;
 
@@ -92,8 +94,8 @@ uint8_t ds1302ReadReg(uint8_t reg)
     DS1302_CE = 0;
     DS1302_SCLK = 0;
     DS1302_CE = 1;
-    ds1302InputByte(reg|0x01);
-    result = ds1302OutputByte();
+    ds1302SendByte(reg|0x01);
+    result = ds1302ReadByte();
     DS1302_SCLK = 1;
     DS1302_CE = 0;
 
@@ -103,9 +105,9 @@ uint8_t ds1302ReadReg(uint8_t reg)
 void ds1302SetProtect(bit flag)
 {
 	if(flag)
-		ds1302WriteReg(0x8E,0x10);
+		ds1302WriteReg(DS1302_PROTECT,0x80);
 	else
-		ds1302WriteReg(0x8E,0x00);
+		ds1302WriteReg(DS1302_PROTECT,0x00);
 
 	return;
 }
@@ -120,18 +122,20 @@ void ds1302SetTime(uint8_t address, uint8_t value)
 
 void rtcInit(void)
 {
-	uint8_t temp = ds1302ReadReg(DS1302_SECOND);
-	if (temp&0x80)
+	uint8_t temp;
+	
+	temp = ds1302ReadReg(DS1302_SECOND);
+	if (temp & 0x80)
 	{
-		rtc.date = 1;
-		rtc.month = 1;
-		rtc.year = 17;
+		rtc.date = 16;
+		rtc.month = 6;
+		rtc.year = 19;
 
 		rtcSaveDate();
 
-		rtc.sec = 0;
-		rtc.min = 0;
-		rtc.hour = 0;
+		rtc.sec = 1;
+		rtc.min = 2;
+		rtc.hour = 3;
 
 		rtcSaveTime();
 	}
@@ -163,6 +167,7 @@ void rtcSaveDate(void)
 	uint8_t i;
 
 	rtcWeekDay();
+
 	for (i = RTC_DATE; i <= RTC_YEAR; i++)
 	{
 		ds1302SetTime(0x80|(i<<1), *((uint8_t*)&rtc + i));
@@ -178,10 +183,10 @@ void rtcReadTime(void)
 	DS1302_CE = 0;
 	DS1302_SCLK = 0;
 	DS1302_CE = 1;
-	ds1302InputByte(DS1302_BURSTCLOCK|0x01);
+	ds1302SendByte(DS1302_BURSTCLOCK|0x01);
 
 	for (i = RTC_SEC; i <= RTC_YEAR; i++) {
-		*((uint8_t*)&rtc + i) = rtcBinDecToDec(ds1302OutputByte());
+		*((uint8_t*)&rtc + i) = rtcBinDecToDec(ds1302ReadByte());
 	}
 	DS1302_SCLK = 1;
 	DS1302_CE = 0;

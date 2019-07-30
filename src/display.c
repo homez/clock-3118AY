@@ -14,9 +14,16 @@
 #include "si7021.h"
 */
 uint8_t data disp[DISPLAYSIZE];
-uint8_t render_buffer_size = 0;
-int16_t scroll_index = -1;
-uint8_t xdata render_buffer[RENDSERBUFFERSIZE];
+
+bit scroll_start;
+uint8_t scroll_disp_index;
+
+uint8_t msg_length;
+uint8_t *msg_str;
+uint8_t rndr_disp_index;
+uint8_t rndr_index;
+uint8_t rndr_line;
+
 uint8_t *pdisp;
 uint8_t code *fptr;
 uint8_t displayBright = 6;
@@ -47,21 +54,26 @@ Widget code widgets[7] = {
 
 void displayInit(void)
 {
-	uint8_t i, code *sptr;;
+	uint8_t i, code *sptr;
 	P0M1 = 0x00;
 	P0M0 = 0xFF;
-	P1M1 = 0x00;
-	P1M0 = 0x0F;
+	P1M1 = 0x20;
+	P1M0 = 0x2F;
 	P2M1 = 0x00;
 	P2M0 = 0xFF;
 	P3M1 = 0x00;
 	P3M0 = 0xF7;
-	P4M1 = 0x00;
-	P4M0 = 0xFE;
+	P4M1 = 0x01;
+	P4M0 = 0xFF;
+	P5M1 = 0x20;
+	P5M0 = 0xFF;
+
+	DS1302_CE = 0;
+	DS1302_SCLK = 0;
+
 	displayBright = eep.bright;
 	refstart = 0;
 	updateFont();
-	//pdisp = &render_buffer[0];
 	// копируем 'заставку'
 	pdisp = &disp[0];
 	sptr = &pic_heart[0];
@@ -140,12 +152,39 @@ void displayRefresh(void)
 			P0 = 0xFF^(((disp[k]>>7)&0x01)|((disp[k]>>5)&0x02)|((disp[k]>>3)&0x04)| (disp[k]>>1&0x08)|((disp[k]<<1)&0x10)|((disp[k]<<3)&0x20)|((disp[k]<<5)&0x40)|((disp[k]<<7)&0x80));
 		}
 		columnrefnum++;
-		if( columnrefnum > 23 ) {
+		if(columnrefnum  >= DISPLAYSIZE) {
 			columnrefnum = 0;
 			//reversed = key_mer;
 			if(!refstart) {
 				refstart = 1;
 			}
+		}
+	}
+
+	return;
+}
+
+void backToMainMode(uint8_t mode)
+{
+	switch(mode) {
+		case SAVEANDBACK:
+		case CANCELANDBACK: {
+				while(refstart == 0) {}
+				displayClear();
+				EA = 0;
+				if (mode == SAVEANDBACK) {
+					settingsSave();
+				}
+				else {
+					settingsInit();
+				}
+				EA = 1;
+		}
+		default:
+		case BACK: {
+			dispMode = MODE_MAIN;
+			screenTime = 0;
+			widgetNumber = 0;
 		}
 	}
 
@@ -195,11 +234,19 @@ void updateFont(void)
 	return;
 }
 
-void resetDispLoop(void)
+void writeToPtr(uint8_t value)
 {
-	dispMode = MODE_MAIN;
-	screenTime = 0;
-	widgetNumber = 0;
+	*pdisp = value;
+	pdisp++;
+}
+
+void showDS1302(void)
+{
+	uint8_t i, code *sptr = &pic_DS1302[0];
+
+	for(i=0; i<DISPLAYSIZE; i++, sptr++, pdisp++) {
+		*pdisp = *sptr;
+	}
 
 	return;
 }
@@ -259,27 +306,45 @@ void showDot(void)
 	return;
 }
 
-void showNumber(uint8_t num, uint8_t clean, uint8_t dig )
+void showDigit(uint8_t digit)
 {
 	uint8_t i, code *sptr;
-
 	for(i=0; i<4; i++, pdisp++) {
-			if(!clean&&(!dig ||((num/10) > 0 ))) {
-			sptr = fptr + (4*(num/10)+i);
-			*pdisp = *sptr;
-		}
-		else
-			*pdisp = 0x00;
+		sptr = fptr + (4*digit+i);
+		*pdisp = *sptr;
 	}
-	*pdisp = 0x00;
-	pdisp++;
-	for(i=0; i<4; i++, pdisp++) {
-		if(!clean) {
-			sptr = fptr + (4*(num%10)+i);
-			*pdisp = *sptr;
-		}
-		else
-			*pdisp = 0x00;
+}
+
+void showMiniDigit(uint8_t digit)
+{
+	uint8_t i;
+	for(i=0; i<3; i++, pdisp++) {
+		*pdisp = num_mini[3*digit+i];
+	}
+}
+
+void showNumber(uint8_t num, uint8_t clean, uint8_t dig )
+{
+	if(!clean&&(!dig ||((num/10) > 0 ))) {
+		showDigit(num/10);
+	}
+	else
+	{
+		SPACELINE;
+		SPACELINE;
+		SPACELINE;
+		SPACELINE;
+	}
+	SPACELINE;
+	if(!clean) {
+		showDigit(num%10);
+	}
+	else
+	{
+		SPACELINE;
+		SPACELINE;
+		SPACELINE;
+		SPACELINE;
 	}
 
 	return;
@@ -287,11 +352,16 @@ void showNumber(uint8_t num, uint8_t clean, uint8_t dig )
 
 void showTime(void)
 {
+	if( rtc.hour > 24 || rtc.min > 60 )
+	{
+		showDS1302();
+		return;
+	}
 	showNumber(rtc.hour, 0, 0);
 	showDot();
 	showNumber(rtc.min, 0, 0);
-	EMPTYLINE;
-	EMPTYLINE;
+	SPACELINE;
+	SPACELINE;
 
 	return;
 }
@@ -300,13 +370,18 @@ void showDate(void)
 {
 	uint8_t i;
 
+	if( rtc.month > 12 || rtc.date > 32 )
+	{
+		showDS1302();
+		return;
+	}
 	showNumber(rtc.date, 0, 1);
 	for(i=0; i<4; i++, pdisp++) {
 		*pdisp = dot_font[4+i];
 	}
 	showNumber(rtc.month, 0, 0);
-	EMPTYLINE;
-	EMPTYLINE;
+	SPACELINE;
+	SPACELINE;
 
 	return;
 }
@@ -323,6 +398,7 @@ void showDayWeek(void)
 		case 5: sptr = &pic_fri[0];break;
 		case 6: sptr = &pic_sat[0];break;
 		case 7: sptr = &pic_sun[0];break;
+		default: sptr = &pic_DS1302[0];break;
 	}
 	for(i=0; i<DISPLAYSIZE; i++, sptr++, pdisp++) {
 		*pdisp = *sptr;
@@ -344,8 +420,8 @@ void showTemperature(void)
 		for(i=0; i<5; i++, pdisp++) {
 			*pdisp = temperature_font[50+i];
 		}
-		EMPTYLINE;
-		EMPTYLINE;
+		SPACELINE;
+		SPACELINE;
 	}
 	else {
 		if (temp > 9) {
@@ -358,17 +434,19 @@ void showTemperature(void)
 				*pdisp = 0x00;
 			}
 		}
-		EMPTYLINE;
+		SPACELINE;
 
 		for(i=0; i<5; i++, pdisp++) {
 			*pdisp = temperature_font[5*(temp%10)+i];
 		}
 	}
-	EMPTYLINE;
-	EMPTYLINE;
+	SPACELINE;
+	SPACELINE;
 	for(i=0; i<9; i++, pdisp++) {
 		*pdisp = temperature_font[55+i];
 	}
+	SPACELINE;
+	SPACELINE;
 
 	return;
 }
@@ -396,7 +474,7 @@ void showMainScreen(void)
 //		case WI_PRES: { showPressure(); break;}
 //		case WI_HUMI: { showHumidity(); break;}
 		case WI_HOLY: { showRenderBuffer(); break;}
-		default: { showTime(); break;}
+		default: { widgetNumber = WI_TIME; showTime(); break;}
 	}
 
 	return;
@@ -472,6 +550,8 @@ void showTimeEdit(void)
 		}
 		showNumber(rtc.min, !((rtc.etm != RTC_MIN)||(flash && (rtc.etm == RTC_MIN))), 0);
 	}
+	SPACELINE;
+	SPACELINE;
 
 	return;
 }
@@ -489,12 +569,12 @@ void showDateEdit(void)
 	else { flash = 0; }
 
 	if(rtc.etm == RTC_YEAR) {
-		EMPTYLINE;
-		EMPTYLINE;
+		SPACELINE;
+		SPACELINE;
 		showNumber(20, 0, 0);
-		EMPTYLINE;
+		SPACELINE;
 		showNumber(rtc.year, !((rtc.etm != RTC_YEAR)||(flash && (rtc.etm == RTC_YEAR))), 0);
-		EMPTYLINE;
+		SPACELINE;
 	}
 	else {
 		showNumber(rtc.date, !((rtc.etm != RTC_DATE)||(flash && (rtc.etm == RTC_DATE))), 1);
@@ -503,6 +583,8 @@ void showDateEdit(void)
 		}
 		showNumber(rtc.month, !((rtc.etm != RTC_MONTH)||(flash && (rtc.etm == RTC_MONTH))), 0);
 	}
+	SPACELINE;
+	SPACELINE;
 
 	return;
 }
@@ -536,6 +618,8 @@ void showAlarmEdit(void)
 			*pdisp = dot_font[4*3+i];
 		}
 		showNumber(alarm.min, !((alarm.etm != ALARM_MIN)||(flash && (alarm.etm == ALARM_MIN))), 0);
+		SPACELINE;
+		SPACELINE;
 	}
 	else {
 		if (refcount < 27) { flash = 0; }
@@ -631,7 +715,7 @@ void showDispEdit(void)
 	for(i=0; i<16; i++, pdisp++) {
 		*pdisp = pic_Type[i];
 	}
-	EMPTYLINE;
+	SPACELINE;
 
 	for(i=0; i<5; i++, pdisp++) {
 		*pdisp = temperature_font[5*eep.dispMode+i];
@@ -675,7 +759,7 @@ void showBrightEdit(void)
 	for(i=0; i<16; i++, pdisp++) {
 		*pdisp = pic_BrEdit[i];
 	}
-	EMPTYLINE;
+	SPACELINE;
 
 	for(i=0; i<5; i++, pdisp++) {
 		*pdisp = temperature_font[5*eep.bright+i];
@@ -740,11 +824,12 @@ void wiNext(void)
 		}*/
 		if(widgetNumber == WI_HOLY) {
 			if(holiday) {
-				scroll_index = 0;
+				scroll_start = 1;
+				scroll_disp_index = DISPLAYSIZE;
 			}
 			else {
 				widgetNumber = WI_TIME;
-				scroll_index = -1;
+				scroll_start = 0;
 			}
 		}
 	}
@@ -764,8 +849,125 @@ void wiTime(void)
 
 void wiHoly(void)
 {
-	if(scroll_index < 0){
+	if(scroll_start == 0){
 		wiNext();
+	}
+
+	return;
+}
+
+uint8_t font_char_to_index(uint8_t chr_code)
+{
+	if(chr_code >= 0xA0) {
+		chr_code -= 0x40;
+	}
+	else if(chr_code >= 0x20) {
+		chr_code -= 0x20;
+	}
+	else {
+		chr_code = 0x1F;
+	}
+
+	return chr_code;
+}
+
+void render_buff_txt(void)
+{
+	uint8_t r_index, r_line, chr_code, fnt_data;
+	
+	r_index = rndr_index;
+	r_line = rndr_line;
+
+	if(r_line >= 5)
+	{
+		SPACELINE;
+		rndr_disp_index++;
+		r_index++;
+		r_line = 0;
+	}
+	while(rndr_disp_index < DISPLAYSIZE)
+	{
+		if(r_index < msg_length)
+		{
+			chr_code = *(msg_str + r_index);
+			chr_code = font_char_to_index(chr_code);
+			for(; r_line < 5; r_line++) {
+				fnt_data = font_cp1251_07[5 * chr_code + r_line];
+				if( fnt_data != VOID ) {
+					if(rndr_disp_index < DISPLAYSIZE)
+					{
+						writeToPtr(fnt_data);
+						rndr_disp_index++;
+					}
+				}
+				else {
+					break;
+				}
+			}
+			r_index++;
+			r_line = 0;
+		}
+		if(rndr_disp_index < DISPLAYSIZE)
+		{
+			SPACELINE;
+			rndr_disp_index++;
+		}
+	}
+
+	return;
+}
+
+void stopRender(void)
+{
+	scroll_start = 0;
+	rndr_index = 0;
+	rndr_line = 0;
+	widgetNumber = WI_TIME;
+	screenTime = 0;
+
+	return;
+}
+
+void incRenderIndex(void)
+{
+	uint8_t chr_code, fnt_data;
+
+	if(scroll_start)
+	{
+		if(scroll_disp_index > 0)
+		{
+			scroll_disp_index -= 1;
+		}
+		else
+		{
+			rndr_line++;
+		}
+
+		if(rndr_index == msg_length)
+		{
+			stopRender();
+			return;
+		}
+		if(rndr_line < 5)
+		{
+			chr_code = *(msg_str + rndr_index);
+			chr_code = font_char_to_index(chr_code);
+			fnt_data = font_cp1251_07[5 * chr_code + rndr_line];
+			if(fnt_data == VOID)
+			{
+				rndr_line = 5;
+			}
+		}
+		if(rndr_line > 5)
+		{
+			rndr_index++;
+			rndr_line = 0;
+			if(rndr_index == msg_length)
+			{
+				stopRender();
+				return;
+			}
+		}
 	}
 
 	return;
@@ -773,60 +975,38 @@ void wiHoly(void)
 
 void showRenderBuffer(void)
 {
-	uint8_t i;
-
-	int16_t ind = scroll_index - DISPLAYSIZE;
-	if( scroll_index > (render_buffer_size + DISPLAYSIZE )) {
-		scroll_index = -1;
-		widgetNumber = 0; screenTime = 0;
+	rndr_disp_index = 0;
+	
+	if(scroll_start == 0)
+	{
+		stopRender();
+		return;
 	}
 
-	for(i=0; i<DISPLAYSIZE; i++) {
-		if(( ind + i >= 0 )&&(ind + i < render_buffer_size )) {
-			disp[i] = render_buffer[(uint8_t)(ind + i)];
+	if(scroll_disp_index > 0)
+	{
+		while(rndr_disp_index < scroll_disp_index)
+		{
+			SPACELINE;
+			rndr_disp_index++;
 		}
-		else {
-			disp[i] = 0x00;
+		if(rndr_disp_index < DISPLAYSIZE)
+		{
+				render_buff_txt();
 		}
+	}
+	else
+	{
+		render_buff_txt();
 	}
 
 	return;
 }
 
-void writeRenderBuffer(uint8_t value)
+void setRenderString(uint8_t length, char *str)
 {
-	if ( render_buffer_size < RENDSERBUFFERSIZE) {
-		render_buffer[render_buffer_size++] = value;
-	}
-
-	return;
-}
-
-void renderHoliday(uint8_t length, char *str)
-{
-	uint8_t i, j, t, c;
-
-	render_buffer_size = 0;
-
-	for(i=0; i < (length - 1); i++, str++) {
-		c = *str;
-		if( c >= 0xA0 ) {
-			c -= 0x40;
-		}
-		else if( c >= 0x20 ) {
-			c -= 0x20;
-		}
-		else {
-			c = 0x1F;
-		}
-		for(j=0; j<5; j++) {
-			t = font_cp1251_07[5*c+j];
-			if( t != VOID ) {
-				writeRenderBuffer(t);
-			}
-		}
-		writeRenderBuffer(0x00);
-	}
+	msg_length = length - 1;
+	msg_str = str;
 
 	return;
 }

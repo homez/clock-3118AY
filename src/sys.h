@@ -6,7 +6,7 @@
 #define SYSCLK_18 18432
 #define SYSCLK_11 11059
 #define SYSCLK_06 6000
-#define SYSCLK SYSCLK_06
+#define SYSCLK SYSCLK_11
 
 typedef unsigned char uint8_t;
 typedef unsigned short uint16_t;

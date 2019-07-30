@@ -1,21 +1,18 @@
-#ifndef _RTC_H_
-#define _RTC_H_
+#ifndef _DS1302_H_
+#define _DS1302_H_
 
 #include "sys.h"
-
-#define AM(X)	X
-#define PM(X)	(X+12)            	  // 转成24小时制
-#define DS1302_RAM(X)	(0xC0+(X)*2)   	//用于计算 DS1302_RAM 地址的宏 
 
 enum {
 	DS1302_SECOND				= 0x80,
 	DS1302_MINUTE				= 0x82,
 	DS1302_HOUR					= 0x84,
-	DS1302_WEEK					= 0x8A,
 	DS1302_DAY					= 0x86,
 	DS1302_MONTH				= 0x88,
+	DS1302_WEEK					= 0x8A,
 	DS1302_YEAR					= 0x8C,
-	DS1302_BURSTCLOCK		= 0xBE
+	DS1302_PROTECT			= 0x8E,
+	DS1302_BURSTCLOCK		= 0xBE,
 };
 
 
@@ -57,4 +54,4 @@ uint16_t rtcYearDay(void);
 uint8_t rtcBinDecToDec(uint8_t num);
 uint8_t rtcDecToBinDec(uint8_t num);
 
-#endif /* _RTC_H_ */
+#endif /* _DS1302_H_ */
