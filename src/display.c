@@ -29,6 +29,7 @@ uint8_t code *fptr;
 uint8_t displayBright = 6;
 uint8_t dispMode = MODE_MAIN;
 uint8_t code hourbright[12] = { 0x00, 0x00, 0x12, 0x34, 0x55, 0x55, 0x55, 0x55, 0x55, 0x54, 0x32, 0x10 };
+uint8_t code adcbright[16] = { 0x55, 0x55, 0x55, 0x44, 0x44, 0x43, 0x33, 0x33, 0x22, 0x22, 0x21, 0x11, 0x11, 0x00, 0x00, 0x00 };
 
 uint8_t menuNumber = MODE_EDIT_TIME;
 uint8_t screenTime = 0;
@@ -453,8 +454,11 @@ void showTemperature(void)
 
 void autoBright(void)
 {
-	if( rtc.hour < 24 && eep.bright == 6 ) {
+	if(rtc.hour < 24 && eep.bright == 6) {
 		displayBright = (rtc.hour&0x01)?(hourbright[rtc.hour>>1] & 0x0F):((hourbright[rtc.hour>>1]>>4 )& 0x0F);
+	}
+	else if (eep.bright == 7) {
+		displayBright = (adc.bright&0x01)?(adcbright[adc.bright>>1] & 0x0F):((adcbright[adc.bright>>1]>>4 )& 0x0F);
 	}
 
 	return;
